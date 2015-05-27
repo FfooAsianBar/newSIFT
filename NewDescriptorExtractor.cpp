@@ -106,6 +106,7 @@ Below is the original copyright.
 #include <iostream>
 #include <stdarg.h>
 
+//CHANGE MATCHING FUNCTION?
 namespace cv
 {
 	CV_INIT_ALGORITHM(NEWSIFT, "Feature2D.NEWSIFT",
@@ -537,15 +538,25 @@ namespace cv
 			}
 			}
 	}
-
-
+//-------------------------------------------------------------------------------------
+	//img: color image
+	//ptf: keypoint
+	//ori: angle(degree) of the keypoint relative to the coordinates, clockwise
+	//scl: radius of meaningful neighborhood around the keypoint 
+	//d: newsift descr_width, 4 in this case
+	//n: newsift_descr_hist_bins, 8 in this case
+	//dst: descriptor array to pass in
+	//changes: 1. img now is a color image
+	//         2. change variable name from bins_per_rad to bins_per_degree
 	static void calcNEWSIFTDescriptor(const Mat& img, Point2f ptf, float ori, float scl,
 		int d, int n, float* dst)
 	{
-		Point pt(cvRound(ptf.x), cvRound(ptf.y));
-		float cos_t = cosf(ori*(float)(CV_PI / 180));
+		Mat greyImg;
+		cvtColor(img, greyImg, CV_BGR2GRAY);
+		Point pt(cvRound(ptf.x), cvRound(ptf.y));	//point object
+		float cos_t = cosf(ori*(float)(CV_PI / 180));	
 		float sin_t = sinf(ori*(float)(CV_PI / 180));
-		float bins_per_rad = n / 360.f;
+		float bins_per_degree = n / 360.f;
 		float exp_scale = -1.f / (d * d * 0.5f);
 		float hist_width = NEWSIFT_DESCR_SCL_FCTR * scl;
 		int radius = cvRound(hist_width * 1.4142135623730951f * (d + 1) * 0.5f);
@@ -554,20 +565,22 @@ namespace cv
 		cos_t /= hist_width;
 		sin_t /= hist_width;
 
+		//Need to change length and histogram length
 		int i, j, k, len = (radius * 2 + 1)*(radius * 2 + 1), histlen = (d + 2)*(d + 2)*(n + 2);
 		int rows = img.rows, cols = img.cols;
 
 		AutoBuffer<float> buf(len * 6 + histlen);
 		float *X = buf, *Y = X + len, *Mag = Y, *Ori = Mag + len, *W = Ori + len;
 		float *RBin = W + len, *CBin = RBin + len, *hist = CBin + len;
-
+		//reserve places for RGB value of all inclosed pixels
+		float *RedBin = hist + len, *GreenBin = RedBin + len, *BlueBin = GreenBin + len;
+		//Vote for 8 color buckets
 		for (i = 0; i < d + 2; i++)
 		{
 			for (j = 0; j < d + 2; j++)
 				for (k = 0; k < n + 2; k++)
 					hist[(i*(d + 2) + j)*(n + 2) + k] = 0.;
 		}
-
 		for (i = -radius, k = 0; i <= radius; i++)
 			for (j = -radius; j <= radius; j++)
 			{
@@ -579,28 +592,47 @@ namespace cv
 			float rbin = r_rot + d / 2 - 0.5f;
 			float cbin = c_rot + d / 2 - 0.5f;
 			int r = pt.y + i, c = pt.x + j;
-
+			//need a r array, g array , b array instead of X and Y.
 			if (rbin > -1 && rbin < d && cbin > -1 && cbin < d &&
 				r > 0 && r < rows - 1 && c > 0 && c < cols - 1)
-			{
-				float dx = (float)(img.at<NEWSIFT_wt>(r, c + 1) - img.at<NEWSIFT_wt>(r, c - 1));
-				float dy = (float)(img.at<NEWSIFT_wt>(r - 1, c) - img.at<NEWSIFT_wt>(r + 1, c));
-				X[k] = dx; Y[k] = dy; RBin[k] = rbin; CBin[k] = cbin;
-				W[k] = (c_rot * c_rot + r_rot * r_rot)*exp_scale;
-				k++;
-			}
+				{
+					float dx = (float)(greyImg.at<NEWSIFT_wt>(r, c + 1) - greyImg.at<NEWSIFT_wt>(r, c - 1));
+					float dy = (float)(greyImg.at<NEWSIFT_wt>(r - 1, c) - greyImg.at<NEWSIFT_wt>(r + 1, c));
+					X[k] = dx; Y[k] = dy; RBin[k] = rbin; CBin[k] = cbin;
+					//W[k] = (c_rot * c_rot + r_rot * r_rot)*exp_scale;
+					//k++;
+					//changes: color histogram
+					//red
+					float r = img.at<Vec3f>(r, c)[2];
+					//green
+					float g = img.at<Vec3f>(r, c)[1];
+					//blue
+					float b = img.at<Vec3f>(r, c)[0];
+					//stores RGB info
+					RedBin[k] = r;
+					GreenBin[k] = g;
+					BlueBin[k] = b;
+					//stores rotation info
+					W[k] = (c_rot * c_rot + r_rot * r_rot)*exp_scale;
+					k++;
+				}
 			}
 
 		len = k;
 		fastAtan2(Y, X, Ori, len, true);
 		magnitude(X, Y, Mag, len);
 		exp(W, W, len);
-
+		
+		// going through all enclosed pixels and vote for bucket
 		for (k = 0; k < len; k++)
 		{
 			float rbin = RBin[k], cbin = CBin[k];
-			float obin = (Ori[k] - ori)*bins_per_rad;
+			float obin = (Ori[k] - ori)*bins_per_degree;
 			float mag = Mag[k] * W[k];
+			//r,g,b value
+			float r = RedBin[k],
+				  g = GreenBin[k],
+				  b = BlueBin[k];
 
 			int r0 = cvFloor(rbin);
 			int c0 = cvFloor(cbin);
@@ -608,13 +640,14 @@ namespace cv
 			rbin -= r0;
 			cbin -= c0;
 			obin -= o0;
-
+			
 			if (o0 < 0)
 				o0 += n;
 			if (o0 >= n)
 				o0 -= n;
 
 			// histogram update using tri-linear interpolation
+			//red
 			float v_r1 = mag*rbin, v_r0 = mag - v_r1;
 			float v_rc11 = v_r1*cbin, v_rc10 = v_r1 - v_rc11;
 			float v_rc01 = v_r0*cbin, v_rc00 = v_r0 - v_rc01;
@@ -622,6 +655,8 @@ namespace cv
 			float v_rco101 = v_rc10*obin, v_rco100 = v_rc10 - v_rco101;
 			float v_rco011 = v_rc01*obin, v_rco010 = v_rc01 - v_rco011;
 			float v_rco001 = v_rc00*obin, v_rco000 = v_rc00 - v_rco001;
+
+			//Voting
 
 			int idx = ((r0 + 1)*(d + 2) + c0 + 1)*(n + 2) + o0;
 			hist[idx] += v_rco000;
@@ -633,8 +668,8 @@ namespace cv
 			hist[idx + (d + 3)*(n + 2)] += v_rco110;
 			hist[idx + (d + 3)*(n + 2) + 1] += v_rco111;
 		}
-
-		// finalize histogram, since the orientation histograms are circular
+//-------------------------------------------------------------------------------------
+		// finalize histogram, since the orientation histograms are circular fixes things 
 		for (i = 0; i < d; i++)
 			for (j = 0; j < d; j++)
 			{
@@ -652,7 +687,7 @@ namespace cv
 		len = d*d*n;
 		for (k = 0; k < len; k++)
 			nrm2 += dst[k] * dst[k];
-		float thr = std::sqrt(nrm2)*NEWSIFT_DESCR_MAG_THR;
+		float thr = std::sqrt(nrm2)*NEWSIFT_DESCR_MAG_THR;  //we didnt change the threshold
 		for (i = 0, nrm2 = 0; i < k; i++)
 		{
 			float val = std::min(dst[i], thr);
@@ -681,8 +716,9 @@ namespace cv
 #endif
 	}
 
+	//changes: add parameter const Mat& colorImage
 	static void calcDescriptors(const vector<Mat>& gpyr, const vector<KeyPoint>& keypoints,
-		Mat& descriptors, int nOctaveLayers, int firstOctave)
+		Mat& descriptors, int nOctaveLayers, int firstOctave, const Mat& colorImage)
 	{
 		int d = NEWSIFT_DESCR_WIDTH, n = NEWSIFT_DESCR_HIST_BINS;
 
@@ -693,14 +729,16 @@ namespace cv
 			float scale;
 			unpackOctave(kpt, octave, layer, scale);
 			CV_Assert(octave >= firstOctave && layer <= nOctaveLayers + 2);
-			float size = kpt.size*scale;
+			float size = kpt.size*scale;        //
 			Point2f ptf(kpt.pt.x*scale, kpt.pt.y*scale);
-			const Mat& img = gpyr[(octave - firstOctave)*(nOctaveLayers + 3) + layer];
-
+			//const Mat& img = gpyr[(octave - firstOctave)*(nOctaveLayers + 3) + layer];
+			//we did this!
 			float angle = 360.f - kpt.angle;
 			if (std::abs(angle - 360.f) < FLT_EPSILON)
-				angle = 0.f;
-			calcNEWSIFTDescriptor(img, ptf, angle, size*0.5f, d, n, descriptors.ptr<float>((int)i));
+				angle = 0.f; 
+			//changes: pass in the color image rather than grey image
+			calcNEWSIFTDescriptor(colorImage, ptf, angle, size*0.5f, d, n, descriptors.ptr<float>((int)i));
+			//image, point being calculated, angle, Size, d = newsift descr_width, n = newsift_descr_hist_bins, all the descriptors
 		}
 	}
 
@@ -813,7 +851,9 @@ namespace cv
 			_descriptors.create((int)keypoints.size(), dsize, CV_32F);
 			Mat descriptors = _descriptors.getMat();
 
-			calcDescriptors(gpyr, keypoints, descriptors, nOctaveLayers, firstOctave);
+			//Need to change this 
+			//change: add color image
+			calcDescriptors(gpyr, keypoints, descriptors, nOctaveLayers, firstOctave, image);
 			//t = (double)getTickCount() - t;
 			//printf("descriptor extraction time: %g\n", t*1000./tf);
 		}
