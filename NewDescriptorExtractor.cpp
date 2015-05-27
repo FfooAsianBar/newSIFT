@@ -168,6 +168,13 @@ namespace cv
 
 	// factor used to convert floating-point descriptor to unsigned char
 	static const float NEWSIFT_INT_DESCR_FCTR = 512.f;
+	
+	//changes: add constant
+	// number of buckets in each dimension for R G B
+	static const int SIZE = 2;
+
+	// range of color value of each bucket
+	static const int BUCKET_SIZE = 256 / SIZE;
 
 #if 0
 	// intermediate type used for DoG pyramids
@@ -556,7 +563,6 @@ namespace cv
 		Point pt(cvRound(ptf.x), cvRound(ptf.y));	//point object
 		float cos_t = cosf(ori*(float)(CV_PI / 180));	
 		float sin_t = sinf(ori*(float)(CV_PI / 180));
-		float bins_per_degree = n / 360.f;
 		float exp_scale = -1.f / (d * d * 0.5f);
 		float hist_width = NEWSIFT_DESCR_SCL_FCTR * scl;
 		int radius = cvRound(hist_width * 1.4142135623730951f * (d + 1) * 0.5f);
@@ -570,10 +576,11 @@ namespace cv
 		int rows = img.rows, cols = img.cols;
 
 		AutoBuffer<float> buf(len * 6 + histlen);
-		float *X = buf, *Y = X + len, *Mag = Y, *Ori = Mag + len, *W = Ori + len;
-		float *RBin = W + len, *CBin = RBin + len, *hist = CBin + len;
-		//reserve places for RGB value of all inclosed pixels
+		float *RBin = buf, *CBin = RBin + len, *hist = CBin + len;
+		//reserve memory for RGB value of all inclosed pixels
 		float *RedBin = hist + len, *GreenBin = RedBin + len, *BlueBin = GreenBin + len;
+		// reserver memory for all inclosed pixels
+		float *colorBucketsIndex = BlueBin + len;
 		//Vote for 8 color buckets
 		for (i = 0; i < d + 2; i++)
 		{
@@ -587,20 +594,16 @@ namespace cv
 			// Calculate sample's histogram array coords rotated relative to ori.
 			// Subtract 0.5 so samples that fall e.g. in the center of row 1 (i.e.
 			// r_rot = 1.5) have full weight placed in row 1 after interpolation.
-			float c_rot = j * cos_t - i * sin_t;
-			float r_rot = j * sin_t + i * cos_t;
-			float rbin = r_rot + d / 2 - 0.5f;
-			float cbin = c_rot + d / 2 - 0.5f;
-			int r = pt.y + i, c = pt.x + j;
+			float c_rot = j * cos_t - i * sin_t;  // column after "rotation"
+			float r_rot = j * sin_t + i * cos_t;  // row after "rotation"
+			float rbin = r_rot + d / 2 - 0.5f;   // row index of 4x4 bin
+			float cbin = c_rot + d / 2 - 0.5f;   // col index of 4x4 bin
+			int r = pt.y + i, c = pt.x + j;      // row and column index in actual image
 			//need a r array, g array , b array instead of X and Y.
 			if (rbin > -1 && rbin < d && cbin > -1 && cbin < d &&
 				r > 0 && r < rows - 1 && c > 0 && c < cols - 1)
 				{
-					float dx = (float)(greyImg.at<NEWSIFT_wt>(r, c + 1) - greyImg.at<NEWSIFT_wt>(r, c - 1));
-					float dy = (float)(greyImg.at<NEWSIFT_wt>(r - 1, c) - greyImg.at<NEWSIFT_wt>(r + 1, c));
-					X[k] = dx; Y[k] = dy; RBin[k] = rbin; CBin[k] = cbin;
-					//W[k] = (c_rot * c_rot + r_rot * r_rot)*exp_scale;
-					//k++;
+					RBin[k] = rbin; CBin[k] = cbin;
 					//changes: color histogram
 					//red
 					float r = img.at<Vec3f>(r, c)[2];
@@ -612,53 +615,61 @@ namespace cv
 					RedBin[k] = r;
 					GreenBin[k] = g;
 					BlueBin[k] = b;
-					//stores rotation info
-					W[k] = (c_rot * c_rot + r_rot * r_rot)*exp_scale;
 					k++;
 				}
 			}
 
 		len = k;
-		fastAtan2(Y, X, Ori, len, true);
-		magnitude(X, Y, Mag, len);
-		exp(W, W, len);
+		//calculate which bucket the inclosed pixels belong to, and assign the index number
+		//to colorBuckets
+		// 0 : 0 <= red <= 127; 0 <= green <= 127; 0 <= blue <= 127
+		// 1 : 0 <= red <= 127; 0 <= green <= 127; 128 <= blue <= 255
+		// 2 : 0 <= red <= 127; 128 <= green <= 255; 0 <= blue <= 127
+		// 3 : 0 <= red <= 127; 128 <= green <= 255; 128 <= blue <= 255
+		// 4 : 128 <= red <= 255; 0 <= green <= 127; 0 <= blue <= 127
+		// 5 : 128 <= red <= 255; 0 <= green <= 127; 128 <= blue <= 255
+		// 6 : 128 <= red <= 255; 128 <= green <= 255; 0 <= blue <= 127
+		// 7 : 128 <= red <= 255; 128 <= green <= 255; 128 <= blue <= 255
+		/*
+			How this works:
+				we have RGB(three dimensions) and each dimensions are divided into 2 parts.
+				Thus, we can think about this in an abstract way: we represent R G B as a 3bits
+				binary number(with R at most significantbit and B at least significant bit). 
+				When a color value(any one of the RGB) falls into 0<= value <=127,we consider that as a 0 bit, 
+				When a color value(any one of the RGB) falls into 127<= value <=255, we consider that as a 1 bit. 
+				Now 3 bits (0-7) can be fully mapped to our 8 color buckets 
+		*/
+		for (int pixel = 0; pixel < k + 1; pixel++)
+		{
+			colorBucketsIndex[pixel] = 4 * int(RedBin[pixel] / BUCKET_SIZE)
+								     + 2 * int(GreenBin[pixel] / BUCKET_SIZE)
+									 + 1 * int(BlueBin[pixel] / BUCKET_SIZE);
+		}
 		
 		// going through all enclosed pixels and vote for bucket
 		for (k = 0; k < len; k++)
 		{
 			float rbin = RBin[k], cbin = CBin[k];
-			float obin = (Ori[k] - ori)*bins_per_degree;
-			float mag = Mag[k] * W[k];
-			//r,g,b value
-			float r = RedBin[k],
-				  g = GreenBin[k],
-				  b = BlueBin[k];
+			int binIndex = colorBucketsIndex[k];
 
 			int r0 = cvFloor(rbin);
 			int c0 = cvFloor(cbin);
-			int o0 = cvFloor(obin);
 			rbin -= r0;
 			cbin -= c0;
-			obin -= o0;
-			
-			if (o0 < 0)
-				o0 += n;
-			if (o0 >= n)
-				o0 -= n;
 
-			// histogram update using tri-linear interpolation
-			//red
-			float v_r1 = mag*rbin, v_r0 = mag - v_r1;
+			//// histogram update using tri-linear interpolation
+			// vote is weighted by 1 in colo histogram
+			// (while vote is weighted by gradient magnitude in grediant orientation histogram)
+			float v_r1 = 1*rbin, v_r0 = 1 - v_r1;
 			float v_rc11 = v_r1*cbin, v_rc10 = v_r1 - v_rc11;
 			float v_rc01 = v_r0*cbin, v_rc00 = v_r0 - v_rc01;
-			float v_rco111 = v_rc11*obin, v_rco110 = v_rc11 - v_rco111;
-			float v_rco101 = v_rc10*obin, v_rco100 = v_rc10 - v_rco101;
-			float v_rco011 = v_rc01*obin, v_rco010 = v_rc01 - v_rco011;
-			float v_rco001 = v_rc00*obin, v_rco000 = v_rc00 - v_rco001;
+			float v_rco111 = 0, v_rco110 = v_rc11 - v_rco111;
+			float v_rco101 = 0, v_rco100 = v_rc10 - v_rco101;
+			float v_rco011 = 0, v_rco010 = v_rc01 - v_rco011;
+			float v_rco001 = 0, v_rco000 = v_rc00 - v_rco001;
 
 			//Voting
-
-			int idx = ((r0 + 1)*(d + 2) + c0 + 1)*(n + 2) + o0;
+			int idx = ((r0 + 1)*(d + 2) + c0 + 1)*(n + 2) + binIndex;
 			hist[idx] += v_rco000;
 			hist[idx + 1] += v_rco001;
 			hist[idx + (n + 2)] += v_rco010;
@@ -667,6 +678,7 @@ namespace cv
 			hist[idx + (d + 2)*(n + 2) + 1] += v_rco101;
 			hist[idx + (d + 3)*(n + 2)] += v_rco110;
 			hist[idx + (d + 3)*(n + 2) + 1] += v_rco111;
+
 		}
 //-------------------------------------------------------------------------------------
 		// finalize histogram, since the orientation histograms are circular fixes things 
