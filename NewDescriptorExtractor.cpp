@@ -615,15 +615,15 @@ namespace cv
 					RBin[k] = rbin; CBin[k] = cbin;
 					//changes: color histogram
 					//red
-					float r = img.at<Vec3f>(r, c)[2];
+					float red = img.at<Vec3f>(r, c)[2];
 					//green
-					float g = img.at<Vec3f>(r, c)[1];
+					float green = img.at<Vec3f>(r, c)[1];
 					//blue
-					float b = img.at<Vec3f>(r, c)[0];
+					float blue = img.at<Vec3f>(r, c)[0];
 					//stores RGB info
-					RedBin[k] = r;
-					GreenBin[k] = g;
-					BlueBin[k] = b;
+					RedBin[k] = red;
+					GreenBin[k] = green;
+					BlueBin[k] = blue;
 					k++;
 				}
 			}
@@ -631,14 +631,15 @@ namespace cv
 		len = k;
 		//calculate which bucket the inclosed pixels belong to, and assign the index number
 		//to colorBuckets
-		// 0 : 0 <= red <= 127; 0 <= green <= 127; 0 <= blue <= 127
-		// 1 : 0 <= red <= 127; 0 <= green <= 127; 128 <= blue <= 255
-		// 2 : 0 <= red <= 127; 128 <= green <= 255; 0 <= blue <= 127
-		// 3 : 0 <= red <= 127; 128 <= green <= 255; 128 <= blue <= 255
-		// 4 : 128 <= red <= 255; 0 <= green <= 127; 0 <= blue <= 127
-		// 5 : 128 <= red <= 255; 0 <= green <= 127; 128 <= blue <= 255
-		// 6 : 128 <= red <= 255; 128 <= green <= 255; 0 <= blue <= 127
-		// 7 : 128 <= red <= 255; 128 <= green <= 255; 128 <= blue <= 255
+		// Bucket index:
+					// 0 : 0 <= red <= 127; 0 <= green <= 127; 0 <= blue <= 127
+					// 1 : 0 <= red <= 127; 0 <= green <= 127; 128 <= blue <= 255
+					// 2 : 0 <= red <= 127; 128 <= green <= 255; 0 <= blue <= 127
+					// 3 : 0 <= red <= 127; 128 <= green <= 255; 128 <= blue <= 255
+					// 4 : 128 <= red <= 255; 0 <= green <= 127; 0 <= blue <= 127
+					// 5 : 128 <= red <= 255; 0 <= green <= 127; 128 <= blue <= 255
+					// 6 : 128 <= red <= 255; 128 <= green <= 255; 0 <= blue <= 127
+					// 7 : 128 <= red <= 255; 128 <= green <= 255; 128 <= blue <= 255
 		/*
 			How this works:
 				we have RGB(three dimensions) and each dimensions are divided into 2 parts.
