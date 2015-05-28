@@ -101,6 +101,15 @@ Below is the original copyright.
 //    NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 //    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 \**********************************************************************************************/
+/***********************************************************************************************
+									Information
+Author: Siqi Zhang, Zhiyuan Xiao, Ken Ohyama, Sandy Chau
+Purpose: Spring 2015 CSS 487 programm 4, University of Washington Bothell
+Due Date: 3rd June 2015
+Description:
+			Based on the NEWSIFT code, we changed the decriptor from 8 orientation histogram to
+			color histogram with 2 buckets on each of the RGB color axies (8 buckets in total).
+***********************************************************************************************/
 
 #include "NewDescriptorExtractor.h"
 #include <iostream>
@@ -662,7 +671,7 @@ namespace cv
 			// (while vote is weighted by gradient magnitude in grediant orientation histogram)
 			float v_r1 = 1*rbin, v_r0 = 1 - v_r1;
 			float v_rc11 = v_r1*cbin, v_rc10 = v_r1 - v_rc11;
-			float v_rc01 = v_r0*cbin, v_rc00 = v_r0 - v_rc01;
+			float v_rc01 = v_r0*cbin, v_rc00 = v_r0 - v_rc01; 
 			float v_rco111 = 0, v_rco110 = v_rc11 - v_rco111;
 			float v_rco101 = 0, v_rco100 = v_rc10 - v_rco101;
 			float v_rco011 = 0, v_rco010 = v_rc01 - v_rco011;
@@ -728,8 +737,8 @@ namespace cv
 #endif
 	}
 
-	//changes: add parameter const Mat& colorImage
-	static void calcDescriptors(const vector<Mat>& gpyr, const vector<KeyPoint>& keypoints,
+	//changes: change grey gaussian pyramid to a colorful one
+	static void calcDescriptors(const vector<Mat>& colorGpyr, const vector<KeyPoint>& keypoints,
 		Mat& descriptors, int nOctaveLayers, int firstOctave, const Mat& colorImage)
 	{
 		int d = NEWSIFT_DESCR_WIDTH, n = NEWSIFT_DESCR_HIST_BINS;
@@ -743,13 +752,12 @@ namespace cv
 			CV_Assert(octave >= firstOctave && layer <= nOctaveLayers + 2);
 			float size = kpt.size*scale;        //
 			Point2f ptf(kpt.pt.x*scale, kpt.pt.y*scale);
-			//const Mat& img = gpyr[(octave - firstOctave)*(nOctaveLayers + 3) + layer];
-			//we did this!
+			const Mat& colorImg = colorGpyr[(octave - firstOctave)*(nOctaveLayers + 3) + layer];
 			float angle = 360.f - kpt.angle;
 			if (std::abs(angle - 360.f) < FLT_EPSILON)
 				angle = 0.f; 
 			//changes: pass in the color image rather than grey image
-			calcNEWSIFTDescriptor(colorImage, ptf, angle, size*0.5f, d, n, descriptors.ptr<float>((int)i));
+			calcNEWSIFTDescriptor(colorImg, ptf, angle, size*0.5f, d, n, descriptors.ptr<float>((int)i));
 			//image, point being calculated, angle, Size, d = newsift descr_width, n = newsift_descr_hist_bins, all the descriptors
 		}
 	}
@@ -813,15 +821,17 @@ namespace cv
 			CV_Assert(firstOctave >= -1 && actualNLayers <= nOctaveLayers);
 			actualNOctaves = maxOctave - firstOctave + 1;
 		}
-
+		// base is a grey image
 		Mat base = createInitialImage(image, firstOctave < 0, (float)sigma);
-		vector<Mat> gpyr, dogpyr;
+		vector<Mat> gpyr, dogpyr, colorGpyr; // colorGpyr is a gaussian pyramid for color image
 		int nOctaves = actualNOctaves > 0 ? actualNOctaves : cvRound(log((double)std::min(base.cols, base.rows)) / log(2.) - 2) - firstOctave;
 
 		//double t, tf = getTickFrequency();
 		//t = (double)getTickCount();
 		buildGaussianPyramid(base, gpyr, nOctaves);
 		buildDoGPyramid(gpyr, dogpyr);
+		// build color gaussian pyramid
+		buildGaussianPyramid(image, colorGpyr, nOctaves);
 
 		//t = (double)getTickCount() - t;
 		//printf("pyramid construction time: %g\n", t*1000./tf);
@@ -865,7 +875,7 @@ namespace cv
 
 			//Need to change this 
 			//change: add color image
-			calcDescriptors(gpyr, keypoints, descriptors, nOctaveLayers, firstOctave, image);
+			calcDescriptors(colorGpyr, keypoints, descriptors, nOctaveLayers, firstOctave, image);
 			//t = (double)getTickCount() - t;
 			//printf("descriptor extraction time: %g\n", t*1000./tf);
 		}
