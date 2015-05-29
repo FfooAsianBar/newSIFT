@@ -230,7 +230,29 @@ namespace cv
 			return gray_fpt;
 		}
 	}
+	// initialize color base image for calculating color gaussian pyramid
+	static Mat createInitialColorImage(const Mat& img, bool doubleImageSize, float sigma)
+	{
+		Mat colorImg = img, color_fpt;
+		img.convertTo(color_fpt, DataType<NEWSIFT_wt>::type, NEWSIFT_FIXPT_SCALE, 0);
 
+		float sig_diff;
+
+		if (doubleImageSize)
+		{
+			sig_diff = sqrtf(std::max(sigma * sigma - NEWSIFT_INIT_SIGMA * NEWSIFT_INIT_SIGMA * 4, 0.01f));
+			Mat dbl;
+			resize(color_fpt, dbl, Size(colorImg.cols * 2, colorImg.rows * 2), 0, 0, INTER_LINEAR);
+			GaussianBlur(dbl, dbl, Size(), sig_diff, sig_diff);
+			return dbl;
+		}
+		else
+		{
+			sig_diff = sqrtf(std::max(sigma * sigma - NEWSIFT_INIT_SIGMA * NEWSIFT_INIT_SIGMA, 0.01f));
+			GaussianBlur(color_fpt, color_fpt, Size(), sig_diff, sig_diff);
+			return color_fpt;
+		}
+	}
 
 	void NEWSIFT::buildGaussianPyramid(const Mat& base, vector<Mat>& pyr, int nOctaves) const
 	{
@@ -584,7 +606,7 @@ namespace cv
 		int i, j, k, len = (radius * 2 + 1)*(radius * 2 + 1), histlen = (d + 2)*(d + 2)*(n + 2);
 		int rows = img.rows, cols = img.cols;
 
-		AutoBuffer<float> buf(len * 6 + histlen);
+		AutoBuffer<float> buf(len * 7 + histlen);
 		float *RBin = buf, *CBin = RBin + len, *hist = CBin + len;
 		//reserve memory for RGB value of all inclosed pixels
 		float *RedBin = hist + len, *GreenBin = RedBin + len, *BlueBin = GreenBin + len;
@@ -651,16 +673,16 @@ namespace cv
 		*/
 		for (int pixel = 0; pixel < k + 1; pixel++)
 		{
-			colorBucketsIndex[pixel] = 4 * int(RedBin[pixel] / BUCKET_SIZE)
-								     + 2 * int(GreenBin[pixel] / BUCKET_SIZE)
-									 + 1 * int(BlueBin[pixel] / BUCKET_SIZE);
+			colorBucketsIndex[pixel] = 4 * (RedBin[pixel] / BUCKET_SIZE)
+								     + 2 * (GreenBin[pixel] / BUCKET_SIZE)
+									 + 1 * (BlueBin[pixel] / BUCKET_SIZE);
 		}
 		
 		// going through all enclosed pixels and vote for bucket
 		for (k = 0; k < len; k++)
 		{
 			float rbin = RBin[k], cbin = CBin[k];
-			int binIndex = colorBucketsIndex[k];
+			int binIndex = int(colorBucketsIndex[k]);
 
 			int r0 = cvFloor(rbin);
 			int c0 = cvFloor(cbin);
@@ -740,7 +762,7 @@ namespace cv
 
 	//changes: change grey gaussian pyramid to a colorful one
 	static void calcDescriptors(const vector<Mat>& colorGpyr, const vector<KeyPoint>& keypoints,
-		Mat& descriptors, int nOctaveLayers, int firstOctave, const Mat& colorImage)
+		Mat& descriptors, int nOctaveLayers, int firstOctave)
 	{
 		int d = NEWSIFT_DESCR_WIDTH, n = NEWSIFT_DESCR_HIST_BINS;
 
@@ -824,6 +846,8 @@ namespace cv
 		}
 		// base is a grey image
 		Mat base = createInitialImage(image, firstOctave < 0, (float)sigma);
+		//initialize color image
+		Mat colorBase = createInitialColorImage(image, firstOctave < 0, (float)sigma);
 		vector<Mat> gpyr, dogpyr, colorGpyr; // colorGpyr is a gaussian pyramid for color image
 		int nOctaves = actualNOctaves > 0 ? actualNOctaves : cvRound(log((double)std::min(base.cols, base.rows)) / log(2.) - 2) - firstOctave;
 
@@ -832,8 +856,7 @@ namespace cv
 		buildGaussianPyramid(base, gpyr, nOctaves);
 		buildDoGPyramid(gpyr, dogpyr);
 		// build color gaussian pyramid
-		buildGaussianPyramid(image, colorGpyr, nOctaves);
-
+		buildGaussianPyramid(colorBase, colorGpyr, nOctaves);
 		//t = (double)getTickCount() - t;
 		//printf("pyramid construction time: %g\n", t*1000./tf);
 
@@ -876,7 +899,7 @@ namespace cv
 
 			//Need to change this 
 			//change: add color image
-			calcDescriptors(colorGpyr, keypoints, descriptors, nOctaveLayers, firstOctave, image);
+			calcDescriptors(colorGpyr, keypoints, descriptors, nOctaveLayers, firstOctave);
 			//t = (double)getTickCount() - t;
 			//printf("descriptor extraction time: %g\n", t*1000./tf);
 		}
